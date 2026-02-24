@@ -263,6 +263,9 @@ struct ContentView: View {
                 // Finder에서 열었을 때 폴더 권한이 없을 수 있음
                 // 이 경우 현재 파일만 표시하고 파일 리스트는 비워두거나 현재 파일만 포함
                 print("폴더 접근 권한 없음: \(dirURL.path)")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    showPermissionAlertAndRetryOpenPanel(for: dirURL)
+                }
             }
         }
     }
@@ -422,8 +425,10 @@ struct ContentView: View {
                     showMenu.toggle()
                     return nil
                 case "o", "O": // cmd+o 또는 o 단독
-                    if event.modifierFlags.contains(.command) || !zipMode {
+                    if event.modifierFlags.contains(.command) {
                         openFile()
+                    } else {
+                        openZipPickerInCurrentDirectory()
                     }
                     return nil
                 case "\u{1b}": // ESC
@@ -438,7 +443,7 @@ struct ContentView: View {
                 case "~", "`": // 파일 정보
                     showFileInfo.toggle()
                     return nil
-                case "d", "D", "ㅇ": // 읽기 방향 전환
+                case "d", "D": // 읽기 방향 전환
                     // ZipManager의 상태를 변경
                     self.zipManager.isRightToLeft.toggle()
                     
@@ -456,30 +461,30 @@ struct ContentView: View {
             // 키 코드 처리 (방향키, 스페이스바)
             // 주의: 클로저 내에서 self.zipManager를 참조하여 최신 상태를 가져옴
             switch event.keyCode {
-                case 123: // 왼쪽 방향키
-                    if self.zipManager.isRightToLeft {
-                        nextImage()
-                    } else {
-                        previousImage()
-                    }
-                    return nil
-                case 124: // 오른쪽 방향키
-                    if self.zipManager.isRightToLeft {
-                        previousImage()
-                    } else {
-                        nextImage()
-                    }
-                    return nil
-                case 126: // 위쪽 방향키
-                    previousImage()
-                    return nil
-                case 125, 49: // 아래쪽 방향키, 스페이스바
+            case 123: // 왼쪽 방향키
+                if self.zipManager.isRightToLeft {
                     nextImage()
-                    return nil
-                default:
-                    return event
+                } else {
+                    previousImage()
                 }
-            } 
+                return nil
+            case 124: // 오른쪽 방향키
+                if self.zipManager.isRightToLeft {
+                    previousImage()
+                } else {
+                    nextImage()
+                }
+                return nil
+            case 126: // 위쪽 방향키
+                previousImage()
+                return nil
+            case 125, 49: // 아래쪽 방향키, 스페이스바
+                nextImage()
+                return nil
+            default:
+                return event
+            }
+        }
     }
     
     private func handleLeftBracketKey() {
@@ -487,50 +492,44 @@ struct ContentView: View {
         let zipFilesOnly = allFilesList.filter { $0.lowercased().hasSuffix(".zip") }
         guard !zipFilesOnly.isEmpty else { return }
 
-        // 현재 기준 파일 경로 결정: ZIP 모드면 현재 ZIP, 아니면 현재 파일
-        let currentReferencePath: String = {
-            if zipMode {
-                return zipManager.currentZipPath ?? ""
-            } else {
-                return currentImagePath ?? ""
-            }
-        }()
+        let targetZipPath: String
 
-        // 현재가 ZIP이 아닌 경우, 전체 목록에서 가장 가까운(이전) ZIP 기준으로 이동하기 위해 현재 파일의 위치를 사용
-        let searchPath: String
-        if zipMode, let currentZip = zipManager.currentZipPath, zipFilesOnly.contains(currentZip) {
-            searchPath = currentZip
+        if zipMode, let currentZip = zipManager.currentZipPath, let currentIndex = zipFilesOnly.firstIndex(of: currentZip) {
+            // ZIP 모드: 이전 ZIP으로 이동 (순환)
+            let prevIndex = currentIndex > 0 ? currentIndex - 1 : zipFilesOnly.count - 1
+            targetZipPath = zipFilesOnly[prevIndex]
         } else {
-            // currentReferencePath가 allFilesList에 있지 않을 수도 있으므로 인덱스를 안전하게 계산
-            if let idx = allFilesList.firstIndex(of: currentReferencePath) {
-                // idx 이전에서 가장 가까운 ZIP을 찾는다
+            // 이미지 모드: 현재 파일 앞에 있는 가장 가까운 ZIP 찾기
+            let currentPath = currentImagePath ?? ""
+            if let idx = allFilesList.firstIndex(of: currentPath) {
                 let prefix = allFilesList[..<idx]
                 if let prevZip = prefix.last(where: { $0.lowercased().hasSuffix(".zip") }) {
-                    searchPath = prevZip
+                    targetZipPath = prevZip
                 } else {
-                    // 앞쪽에 없으면 마지막 ZIP으로 래핑
-                    searchPath = zipFilesOnly.last!
+                    // 앞쪽에 없으면 마지막 ZIP (순환)
+                    targetZipPath = zipFilesOnly.last!
                 }
             } else {
-                // 현재 파일을 찾지 못하면 마지막 ZIP으로 이동
-                searchPath = zipFilesOnly.last!
+                // 현재 파일 못 찾으면 마지막 ZIP
+                targetZipPath = zipFilesOnly.last!
             }
         }
 
-        // searchPath를 zipFilesOnly에서의 인덱스로 변환하여 바로 이전 ZIP 선택
-        let currentZipIndexInZips = zipFilesOnly.firstIndex(of: searchPath) ?? (zipFilesOnly.count - 1)
-        let previousIndex = currentZipIndexInZips > 0 ? currentZipIndexInZips - 1 : (zipFilesOnly.count - 1)
-        let previousZipPath = zipFilesOnly[previousIndex]
-
         // 해당 ZIP을 로드하고 첫 번째 이미지를 연다
-        loadZipFile(at: previousZipPath)
-        if let firstImagePath = imagesInCurrentZip.first, let firstImage = NSImage(contentsOfFile: firstImagePath) {
-            currentIndex = 0
-            currentImage = firstImage
-            currentImagePath = firstImagePath
+        let didLoad = withSecurityScopedAccessForZip(at: targetZipPath) {
+            loadZipFile(at: targetZipPath)
+            if let firstImagePath = imagesInCurrentZip.first, let firstImage = NSImage(contentsOfFile: firstImagePath) {
+                currentIndex = 0
+                currentImage = firstImage
+                currentImagePath = firstImagePath
+            }
+        }
+        guard didLoad else {
+            showZipPermissionAlert(for: targetZipPath)
+            return
         }
 
-        nextFileName = URL(fileURLWithPath: previousZipPath).lastPathComponent
+        nextFileName = URL(fileURLWithPath: targetZipPath).lastPathComponent
         showNextFileInfo = true
     }
     
@@ -539,49 +538,44 @@ struct ContentView: View {
         let zipFilesOnly = allFilesList.filter { $0.lowercased().hasSuffix(".zip") }
         guard !zipFilesOnly.isEmpty else { return }
 
-        // 현재 기준 파일 경로 결정: ZIP 모드면 현재 ZIP, 아니면 현재 파일
-        let currentReferencePath: String = {
-            if zipMode {
-                return zipManager.currentZipPath ?? ""
-            } else {
-                return currentImagePath ?? ""
-            }
-        }()
+        let targetZipPath: String
 
-        // 현재가 ZIP이 아닌 경우, 전체 목록에서 가장 가까운(다음) ZIP 기준으로 이동하기 위해 현재 파일의 위치를 사용
-        let searchPath: String
-        if zipMode, let currentZip = zipManager.currentZipPath, zipFilesOnly.contains(currentZip) {
-            searchPath = currentZip
+        if zipMode, let currentZip = zipManager.currentZipPath, let currentIndex = zipFilesOnly.firstIndex(of: currentZip) {
+            // ZIP 모드: 다음 ZIP으로 이동 (순환)
+            let nextIndex = (currentIndex + 1) % zipFilesOnly.count
+            targetZipPath = zipFilesOnly[nextIndex]
         } else {
-            if let idx = allFilesList.firstIndex(of: currentReferencePath) {
-                // idx 이후에서 가장 가까운 ZIP을 찾는다
+            // 이미지 모드: 현재 파일 뒤에 있는 첫 번째 ZIP 찾기
+            let currentPath = currentImagePath ?? ""
+            if let idx = allFilesList.firstIndex(of: currentPath) {
                 let suffix = allFilesList[(idx+1)...]
                 if let nextZip = suffix.first(where: { $0.lowercased().hasSuffix(".zip") }) {
-                    searchPath = nextZip
+                    targetZipPath = nextZip
                 } else {
-                    // 뒤쪽에 없으면 첫 ZIP으로 래핑
-                    searchPath = zipFilesOnly.first!
+                    // 뒤쪽에 없으면 첫 번째 ZIP (순환)
+                    targetZipPath = zipFilesOnly.first!
                 }
             } else {
-                // 현재 파일을 찾지 못하면 첫 ZIP으로 이동
-                searchPath = zipFilesOnly.first!
+                // 현재 파일 못 찾으면 첫 번째 ZIP
+                targetZipPath = zipFilesOnly.first!
             }
         }
 
-        // searchPath를 zipFilesOnly에서의 인덱스로 변환하여 바로 다음 ZIP 선택
-        let currentZipIndexInZips = zipFilesOnly.firstIndex(of: searchPath) ?? 0
-        let nextIndex = currentZipIndexInZips < (zipFilesOnly.count - 1) ? currentZipIndexInZips + 1 : 0
-        let nextZipPath = zipFilesOnly[nextIndex]
-
         // 해당 ZIP을 로드하고 첫 번째 이미지를 연다
-        loadZipFile(at: nextZipPath)
-        if let firstImagePath = imagesInCurrentZip.first, let firstImage = NSImage(contentsOfFile: firstImagePath) {
-            currentIndex = 0
-            currentImage = firstImage
-            currentImagePath = firstImagePath
+        let didLoad = withSecurityScopedAccessForZip(at: targetZipPath) {
+            loadZipFile(at: targetZipPath)
+            if let firstImagePath = imagesInCurrentZip.first, let firstImage = NSImage(contentsOfFile: firstImagePath) {
+                currentIndex = 0
+                currentImage = firstImage
+                currentImagePath = firstImagePath
+            }
+        }
+        guard didLoad else {
+            showZipPermissionAlert(for: targetZipPath)
+            return
         }
 
-        nextFileName = URL(fileURLWithPath: nextZipPath).lastPathComponent
+        nextFileName = URL(fileURLWithPath: targetZipPath).lastPathComponent
         showNextFileInfo = true
     }
     
@@ -674,15 +668,142 @@ struct ContentView: View {
     private func showPermissionAlertAndRetryOpenPanel(for directory: URL) {
         let alert = NSAlert()
         alert.messageText = "폴더 접근 권한 필요"
-        alert.informativeText = "폴더(\(directory.path))에 접근 권한이 없습니다. 폴더를 직접 선택해 주세요."
-        alert.addButton(withTitle: "폴더 선택")
-        alert.addButton(withTitle: "취소")
+        alert.informativeText = "폴더(\(directory.path))에 접근 권한이 없습니다. 확인을 누르면 권한 선택 창을 자동으로 엽니다."
+        alert.addButton(withTitle: "확인")
         alert.alertStyle = .warning
-        presentAlertAsSheet(alert) { response in
-            if response == .alertFirstButtonReturn {
-                openFile()
+        presentAlertAsSheet(alert) { _ in
+            openDirectoryPermissionPanel(for: directory)
+        }
+    }
+
+    private func openDirectoryPermissionPanel(for directory: URL) {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.directoryURL = directory
+        panel.prompt = "권한 허용"
+        panel.message = "접근 권한을 허용할 폴더를 선택해 주세요"
+
+        if panel.runModal() == .OK, let selectedDirectoryURL = panel.url {
+            let didAccess = withSecurityScopedAccessForDirectory(at: selectedDirectoryURL) {
+                savedDirectory = selectedDirectoryURL.path
+                createAllFilesListFromDirectory(selectedDirectoryURL.path)
+                updateZipFilesList(in: selectedDirectoryURL.path)
+            }
+
+            if !didAccess {
+                showPermissionAlert(for: selectedDirectoryURL)
             }
         }
+    }
+
+    private func withSecurityScopedAccessForZip(at zipPath: String, action: () -> Void) -> Bool {
+        let directoryURL = URL(fileURLWithPath: zipPath).deletingLastPathComponent()
+
+        if let bookmarkedURL = PermissionManager.shared.resolveBookmark(for: directoryURL.path) {
+            defer { bookmarkedURL.stopAccessingSecurityScopedResource() }
+            action()
+            return true
+        }
+
+        if directoryURL.startAccessingSecurityScopedResource() {
+            defer { directoryURL.stopAccessingSecurityScopedResource() }
+            PermissionManager.shared.saveBookmark(for: directoryURL)
+            action()
+            return true
+        }
+
+        return false
+    }
+
+    private func showZipPermissionAlert(for zipPath: String) {
+        let zipName = URL(fileURLWithPath: zipPath).lastPathComponent
+        let alert = NSAlert()
+        alert.messageText = "ZIP 접근 권한 필요"
+        alert.informativeText = "\(zipName) 파일을 열 권한이 없습니다. 폴더를 다시 선택해 권한을 부여해 주세요."
+        alert.addButton(withTitle: "확인")
+        alert.alertStyle = .warning
+        presentAlertAsSheet(alert)
+    }
+
+    private func openZipPickerInCurrentDirectory() {
+        guard let directoryPath = currentDirectoryPathForZipSelection() else {
+            showNoCurrentDirectoryAlertForZipSelection()
+            return
+        }
+
+        let directoryURL = URL(fileURLWithPath: directoryPath, isDirectory: true)
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.zip]
+        panel.directoryURL = directoryURL
+        panel.prompt = "ZIP 열기"
+
+        let didAccess = withSecurityScopedAccessForDirectory(at: directoryURL) {
+            if panel.runModal() == .OK, let selectedURL = panel.url {
+                let selectedDirectory = selectedURL.deletingLastPathComponent().path
+                guard selectedDirectory == directoryPath else {
+                    showZipSelectionOutOfCurrentDirectoryAlert(directoryPath: directoryPath)
+                    return
+                }
+                processSelectedURL(selectedURL)
+            }
+        }
+
+        if !didAccess {
+            showPermissionAlertAndRetryOpenPanel(for: directoryURL)
+        }
+    }
+
+    private func currentDirectoryPathForZipSelection() -> String? {
+        if let savedDirectory {
+            return savedDirectory
+        }
+        if let currentImagePath {
+            return URL(fileURLWithPath: currentImagePath).deletingLastPathComponent().path
+        }
+        if let currentZipPath = zipManager.currentZipPath {
+            return URL(fileURLWithPath: currentZipPath).deletingLastPathComponent().path
+        }
+        return nil
+    }
+
+    private func withSecurityScopedAccessForDirectory(at directoryURL: URL, action: () -> Void) -> Bool {
+        if let bookmarkedURL = PermissionManager.shared.resolveBookmark(for: directoryURL.path) {
+            defer { bookmarkedURL.stopAccessingSecurityScopedResource() }
+            action()
+            return true
+        }
+
+        if directoryURL.startAccessingSecurityScopedResource() {
+            defer { directoryURL.stopAccessingSecurityScopedResource() }
+            PermissionManager.shared.saveBookmark(for: directoryURL)
+            action()
+            return true
+        }
+
+        return false
+    }
+
+    private func showNoCurrentDirectoryAlertForZipSelection() {
+        let alert = NSAlert()
+        alert.messageText = "현재 폴더 정보 없음"
+        alert.informativeText = "먼저 파일 또는 폴더를 열어 현재 작업 폴더를 설정해 주세요."
+        alert.addButton(withTitle: "확인")
+        alert.alertStyle = .warning
+        presentAlertAsSheet(alert)
+    }
+
+    private func showZipSelectionOutOfCurrentDirectoryAlert(directoryPath: String) {
+        let alert = NSAlert()
+        alert.messageText = "다른 폴더의 ZIP은 열 수 없음"
+        alert.informativeText = "o 키로는 현재 폴더(\(directoryPath)) 안의 ZIP 파일만 선택할 수 있습니다."
+        alert.addButton(withTitle: "확인")
+        alert.alertStyle = .warning
+        presentAlertAsSheet(alert)
     }
 }
 
