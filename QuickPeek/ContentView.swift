@@ -315,12 +315,23 @@ struct ContentView: View {
         
         if !images.isEmpty {
             imagesInCurrentZip = images
+            
+            // Check readability of first image path
+            let firstImagePath = imagesInCurrentZip[0]
+            if !FileManager.default.isReadableFile(atPath: firstImagePath) {
+                showPermissionAlertAndRetryOpenPanel(for: URL(fileURLWithPath: path).deletingLastPathComponent())
+                return
+            }
+            
             currentIndex = 0
             // ZIP 파일 열 때 첫 번째 이미지를 열도록 함
-            let firstImagePath = imagesInCurrentZip[0]
-            if let firstImage = NSImage(contentsOfFile: firstImagePath) {
-                currentImage = firstImage
-                currentImagePath = firstImagePath
+            if FileManager.default.isReadableFile(atPath: firstImagePath) {
+                if let firstImage = NSImage(contentsOfFile: firstImagePath) {
+                    currentImage = firstImage
+                    currentImagePath = firstImagePath
+                }
+            } else {
+                showPermissionAlertAndRetryOpenPanel(for: URL(fileURLWithPath: path).deletingLastPathComponent())
             }
         } else {
             // ZIP 파일에 이미지가 없으면 다음 ZIP 파일로 이동
@@ -518,10 +529,14 @@ struct ContentView: View {
         // 해당 ZIP을 로드하고 첫 번째 이미지를 연다
         let didLoad = withSecurityScopedAccessForZip(at: targetZipPath) {
             loadZipFile(at: targetZipPath)
-            if let firstImagePath = imagesInCurrentZip.first, let firstImage = NSImage(contentsOfFile: firstImagePath) {
-                currentIndex = 0
-                currentImage = firstImage
-                currentImagePath = firstImagePath
+            if let firstImagePath = imagesInCurrentZip.first, FileManager.default.isReadableFile(atPath: firstImagePath) {
+                if let firstImage = NSImage(contentsOfFile: firstImagePath) {
+                    currentIndex = 0
+                    currentImage = firstImage
+                    currentImagePath = firstImagePath
+                }
+            } else {
+                showPermissionAlertAndRetryOpenPanel(for: URL(fileURLWithPath: targetZipPath).deletingLastPathComponent())
             }
         }
         guard didLoad else {
@@ -564,10 +579,14 @@ struct ContentView: View {
         // 해당 ZIP을 로드하고 첫 번째 이미지를 연다
         let didLoad = withSecurityScopedAccessForZip(at: targetZipPath) {
             loadZipFile(at: targetZipPath)
-            if let firstImagePath = imagesInCurrentZip.first, let firstImage = NSImage(contentsOfFile: firstImagePath) {
-                currentIndex = 0
-                currentImage = firstImage
-                currentImagePath = firstImagePath
+            if let firstImagePath = imagesInCurrentZip.first, FileManager.default.isReadableFile(atPath: firstImagePath) {
+                if let firstImage = NSImage(contentsOfFile: firstImagePath) {
+                    currentIndex = 0
+                    currentImage = firstImage
+                    currentImagePath = firstImagePath
+                }
+            } else {
+                showPermissionAlertAndRetryOpenPanel(for: URL(fileURLWithPath: targetZipPath).deletingLastPathComponent())
             }
         }
         guard didLoad else {
@@ -583,11 +602,15 @@ struct ContentView: View {
         if zipMode {
             // ZIP 모드에서는 ZIP 내부의 다음 이미지
             if currentIndex < imagesInCurrentZip.count - 1 {
-                currentIndex += 1
-                let nextImagePath = imagesInCurrentZip[currentIndex]
-                if let nextImage = NSImage(contentsOfFile: nextImagePath) {
-                    currentImage = nextImage
-                    currentImagePath = nextImagePath
+                let nextImagePath = imagesInCurrentZip[currentIndex + 1]
+                if FileManager.default.isReadableFile(atPath: nextImagePath) {
+                    currentIndex += 1
+                    if let nextImage = NSImage(contentsOfFile: nextImagePath) {
+                        currentImage = nextImage
+                        currentImagePath = nextImagePath
+                    }
+                } else {
+                    showPermissionAlertAndRetryOpenPanel(for: URL(fileURLWithPath: nextImagePath).deletingLastPathComponent())
                 }
             } else {
                 // ZIP 내부의 마지막 이미지이면 다음 ZIP 파일로 이동
@@ -606,11 +629,15 @@ struct ContentView: View {
         if zipMode {
             // ZIP 모드에서는 ZIP 내부의 이전 이미지
             if currentIndex > 0 {
-                currentIndex -= 1
-                let prevImagePath = imagesInCurrentZip[currentIndex]
-                if let prevImage = NSImage(contentsOfFile: prevImagePath) {
-                    currentImage = prevImage
-                    currentImagePath = prevImagePath
+                let prevImagePath = imagesInCurrentZip[currentIndex - 1]
+                if FileManager.default.isReadableFile(atPath: prevImagePath) {
+                    currentIndex -= 1
+                    if let prevImage = NSImage(contentsOfFile: prevImagePath) {
+                        currentImage = prevImage
+                        currentImagePath = prevImagePath
+                    }
+                } else {
+                    showPermissionAlertAndRetryOpenPanel(for: URL(fileURLWithPath: prevImagePath).deletingLastPathComponent())
                 }
             } else {
                 // ZIP 내부의 첫 이미지이면 이전 ZIP 파일로 이동
