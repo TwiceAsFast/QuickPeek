@@ -1,0 +1,82 @@
+# Xcode & Swift
+.DS_Store
+*/.DS_Store
+
+# Build artifacts
+build/
+Build/
+DerivedData/
+
+# Xcode user data
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+*.moved-aside
+*.xcuserdatad/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Swift Package Manager
+.swiftpm/
+.build/
+
+# CocoaPods
+Pods/
+*.podspec.json
+
+# Carthage
+Carthage/Build/
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output
+
+# Code coverage
+*.xccovreport
+*.xccovarchive
+*.profdata
+
+# Logs
+*.log
+
+# Temporary files
+*.orig
+*.rej
+*.swp
+*.swo
+*~
+
+# Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+# SwiftLint cache
+.swiftlint.cache
+
+# SPM resolved (optional; keep if you want to lock deps)
+# Package.resolved
+
+# User-specific settings
+*.local
+
+# Archives
+*.xcarchive
+
+# Symbol archives
+*.dSYM
+*.dSYM.zip
+
+# Generated screenshots or artifacts
+Screenshots/
+
+# macOS metadata
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+.TemporaryItems
+.apdisk
